@@ -25,14 +25,14 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 8. Thiết kế pipeline: kiểm tra robots -> fetch list -> lọc trùng -> fetch detail -> parse -> persist -> ghi log kết quả.
 
 1. Phase 4 - Public API + Admin API + AI Summarize (depends on Phase 2/3)
-1. Public API: home feed, danh sách bài viết phân trang, chi tiết bài viết, tìm kiếm theo từ khóa, lọc theo nguồn/chuyên mục/thời gian.
-2. Dashboard API: số lượng crawl thành công/thất bại, độ trễ cập nhật, top nguồn theo sản lượng.
-3. Summary API: trả tóm tắt ngắn/trung bình cho bài viết, trạng thái summarize, version model, thời điểm cập nhật.
+1. Public API đầy đủ: `GET /api/public/home`, `GET /api/public/articles`, `GET /api/public/articles/{id-or-slug}`, `GET /api/public/sources`, `GET /api/public/categories`, `GET /api/public/trending`, `GET /api/public/search/suggestions`.
+2. Dashboard API đầy đủ: `GET /api/admin/dashboard/overview`, `GET /api/admin/dashboard/crawl-metrics`, `GET /api/admin/dashboard/summary-metrics`, `GET /api/admin/dashboard/source-health`.
+3. Summary API: `GET /api/public/articles/{id}/summary`, `POST /api/admin/summaries/jobs`, `GET /api/admin/summaries/jobs`, `POST /api/admin/summaries/{articleId}/retry`, `PUT /api/admin/summaries/{articleId}`.
 4. AI summarize chạy bất đồng bộ theo `summary_job` queue trong PostgreSQL: article mới hoặc article cập nhật sẽ enqueue job, worker riêng lấy job theo batch nhỏ để gọi model.
-5. Admin API: CRUD nguồn crawl, bật/tắt nguồn, chạy crawl thủ công theo nguồn/toàn bộ.
-6. Admin Crawl Data API: xem job lịch sử, re-crawl theo nguồn/khoảng thời gian, dọn dữ liệu theo retention policy.
-7. Admin Summarize API: trigger summarize theo bài/theo batch, duyệt/sửa tóm tắt thủ công khi cần.
-8. Bổ sung OpenAPI/Swagger và chuẩn error response.
+5. Admin Sources API: `GET/POST/PUT /api/admin/sources`, `POST /api/admin/sources/{id}/enable`, `POST /api/admin/sources/{id}/disable`, `POST /api/admin/sources/{id}/crawl`.
+6. Admin Crawl Data API: `GET /api/admin/crawl-jobs`, `GET /api/admin/crawl-jobs/{id}`, `POST /api/admin/crawl-jobs/retry`, `POST /api/admin/crawl-jobs/run-all`, `POST /api/admin/articles/reindex`, `DELETE /api/admin/crawl-raw-snapshots` theo retention policy.
+7. Admin Articles API: `GET /api/admin/articles`, `GET /api/admin/articles/{id}`, `POST /api/admin/articles/{id}/re-crawl`, `POST /api/admin/articles/{id}/deduplicate`, `PATCH /api/admin/articles/{id}/status`.
+8. Bổ sung OpenAPI/Swagger, chuẩn error response, pagination/filter/sort nhất quán cho mọi endpoint list.
 
 1. Phase 5 - Angular app (parallel with late Phase 4 once API contract ổn định)
 1. Cấu trúc app theo feature modules: Home, NewsList, NewsDetail, SearchFilter, Dashboard, AdminSources, AdminCrawlData, AdminSummaries.
@@ -85,11 +85,19 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 3. Lớp 3 theo fingerprint nội dung: hash(`normalized_title + published_at_rounded + source_id`).
 4. Lớp 4 gần trùng (near-duplicate) tùy chọn: simhash/minhash trên title+summary để loại các bài cập nhật rất nhỏ.
 - Chính sách upsert: nếu trùng URL thì cập nhật metadata mới (tags, ảnh, category) nhưng giữ lịch sử crawl trong `crawl_result`.
-- Chính sách AI summarize khuyến nghị cho MVP: Azure OpenAI (model gợi ý `gpt-4o-mini` hoặc model chi phí thấp tương đương), fallback OpenAI nếu không dùng Azure.
+- Chống trùng ở mức database:
+1. Unique index trên `canonical_url` khi khác null.
+2. Unique index trên `normalized_source_url`.
+3. Index trên `content_fingerprint` để detect nhanh trùng logic.
+4. Bảng `article_duplicate_map` để lưu quan hệ `original_article_id -> duplicate_article_id`, lý do merge và thời điểm merge.
+5. Khi có race condition nhiều worker cùng insert, backend dùng upsert (`ON CONFLICT DO UPDATE`) để DB là lớp chặn cuối cùng.
+
+- Chính sách AI summarize tạm thời cho MVP: ưu tiên model miễn phí/local trước, cụ thể `Ollama + qwen2.5:7b-instruct` hoặc `gemma2:9b` nếu server đủ tài nguyên; fallback sang Hugging Face Inference free tier nếu cần.
 - Chiến lược summarize:
 1. Chỉ summarize khi bài mới hoặc nội dung thay đổi đáng kể.
 2. Sinh 2 phiên bản `short_summary` (1-2 câu) và `standard_summary` (4-6 câu).
 3. Áp rule kiểm duyệt đầu ra: tiếng Việt, không thêm fact ngoài bài, không quá ngưỡng ký tự.
+4. Nếu model miễn phí timeout hoặc chất lượng thấp, hệ thống giữ trạng thái `PENDING_REVIEW` hoặc `FAILED` thay vì chèn summary kém chất lượng.
 - Trang Home hiển thị:
 1. Hero block: top 5 tin mới nhất toàn hệ thống (ưu tiên bài có summary).
 2. Feed chính phân trang: tiêu đề, nguồn, thời gian, ảnh đại diện, short summary, nhãn chuyên mục.
@@ -145,7 +153,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - Database: PostgreSQL 16, Flyway hoặc Liquibase cho migration.
 - Auth: JWT access token + refresh token; password hash bằng BCrypt/Argon2.
 - API docs: springdoc OpenAPI/Swagger.
-- AI integration: OpenAI hoặc Azure OpenAI qua abstraction `SummaryProvider`; prompt versioning lưu trong DB.
+- AI integration: abstraction `SummaryProvider`; ưu tiên Ollama với model miễn phí/local (`qwen2.5:7b-instruct`, `gemma2:9b`) cho MVP, có thể mở rộng sang OpenAI/Azure OpenAI sau; prompt versioning lưu trong DB.
 - Testing backend: JUnit 5, Spring Boot Test, Testcontainers cho PostgreSQL nếu cần integration test thực tế.
 - Testing frontend: Jasmine/Karma hoặc Jest tùy scaffold Angular, Playwright cho e2e smoke test.
 - Build và packaging: Docker, Docker Compose, GitHub Actions, GHCR hoặc Docker Hub để lưu image.
@@ -205,6 +213,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - EC2 staging tối thiểu: 2 vCPU, 4 GB RAM, 40-60 GB SSD; production tối thiểu: 4 vCPU, 8 GB RAM, 80+ GB SSD nếu crawler và summarize chạy cùng máy.
 - OS khuyến nghị: Ubuntu 22.04 LTS, Docker Engine + Docker Compose plugin, Nginx, OpenJDK 21, Node 20 LTS cho build runner.
 - Nếu dùng Playwright trên production node: cần thêm dependency system packages và tăng RAM tối thiểu lên 8 GB.
+- Nếu chạy Ollama trên cùng máy production: khuyến nghị tăng lên ít nhất 8-16 GB RAM; nếu máy yếu thì tách summarize sang node riêng hoặc tắt auto-summary theo batch lớn.
 - Domain và TLS: dùng Route53 hoặc DNS bất kỳ, HTTPS qua Let's Encrypt/Nginx.
 - Database: PostgreSQL 16, bật backup hằng ngày, retention log tối thiểu 7-14 ngày.
 - Observability tối thiểu: application logs, Nginx logs, disk/RAM/CPU metrics, alert khi crawl error rate hoặc summarize failure rate vượt ngưỡng.
