@@ -1,11 +1,11 @@
 ## Plan: Nền tảng Crawl Tin Tức Việt Nam
 
-Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin tức từ VnExpress, Tuoi Tre, Thanh Nien, Dan Tri, kenh14.vn với chu kỳ 30-60 phút, tuân thủ robots.txt theo từng nguồn, quản lý vòng đời crawl data, lưu nội dung bài viết + metadata + link gốc vào PostgreSQL, và bổ sung AI summarize news để hỗ trợ hiển thị/tóm tắt nhanh trên home, detail, dashboard và trang quản trị.
+Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin tức từ VnExpress, Tuoi Tre, Thanh Nien, Dan Tri, kenh14.vn với chu kỳ 30-60 phút, tuân thủ robots.txt theo từng nguồn, quản lý vòng đời crawl data, dùng Redis cho cache và tối ưu vận hành, lưu nội dung bài viết + metadata + link gốc vào PostgreSQL, và bổ sung AI summarize news theo cơ chế manual-first, có thể bật/tắt tự động bằng cấu hình, để hỗ trợ hiển thị/tóm tắt nhanh trên home, detail, dashboard và trang quản trị.
 
 **Steps**
 1. Phase 1 - Khởi tạo kiến trúc nền (blocking)
 1. Tạo 2 project độc lập: `frontend` (Angular) và `backend` (Spring Boot).
-2. Chuẩn hóa môi trường local bằng Docker Compose cho PostgreSQL + pgAdmin (tuỳ chọn) và profile `dev` cho backend.
+2. Chuẩn hóa môi trường local bằng Docker Compose cho PostgreSQL + Redis + pgAdmin (tuỳ chọn) và profile `dev` cho backend.
 3. Thiết lập cấu hình chung: timezone `Asia/Ho_Chi_Minh`, encoding UTF-8, logging chuẩn JSON/text, CORS giữa Angular và backend.
 
 1. Phase 2 - Thiết kế dữ liệu & domain backend (depends on Phase 1)
@@ -19,16 +19,17 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 2. Tạo scheduler chạy 30-60 phút bằng `@Scheduled` + ShedLock để tránh chạy chồng job giữa nhiều instance.
 3. Dùng Jsoup-first cho phần lớn nguồn tĩnh, chỉ fallback sang Playwright cho nguồn/trang detail render động bằng JavaScript.
 4. Thêm retry/backoff, timeout, user-agent rotation cơ bản, theo dõi lỗi theo nguồn, và giới hạn concurrency bằng thread pool riêng cho crawler.
-5. Thực thi legal guard: tải và cache robots.txt theo domain, chỉ crawl các path được phép, lưu dấu vết quyết định allow/disallow theo mỗi crawl job.
-6. Thêm quản lý crawl data: lưu snapshot raw (tuỳ chọn), chuẩn hóa parser version, chính sách retention/archiving, và cơ chế re-crawl theo bài lỗi hoặc bài hot.
+5. Dùng Redis cho cache robots.txt, cache homepage/query nóng, cache source health ngắn hạn, và rate-limit cho thao tác admin.
+6. Thực thi legal guard: tải và cache robots.txt theo domain, chỉ crawl các path được phép, lưu dấu vết quyết định allow/disallow theo mỗi crawl job.
+7. Thêm quản lý crawl data: lưu snapshot raw (tuỳ chọn), chuẩn hóa parser version, chính sách retention/archiving, và cơ chế re-crawl theo bài lỗi hoặc bài hot.
 7. Chuẩn hóa dữ liệu lưu nội dung + metadata + link gốc: title, summary, content_html/content_text, author, category, tags, image, published_at, crawl_at, source_url, canonical_url.
 8. Thiết kế pipeline: kiểm tra robots -> fetch list -> lọc trùng -> fetch detail -> parse -> persist -> ghi log kết quả.
 
 1. Phase 4 - Public API + Admin API + AI Summarize (depends on Phase 2/3)
 1. Public API đầy đủ: `GET /api/public/home`, `GET /api/public/articles`, `GET /api/public/articles/{id-or-slug}`, `GET /api/public/sources`, `GET /api/public/categories`, `GET /api/public/trending`, `GET /api/public/search/suggestions`.
 2. Dashboard API đầy đủ: `GET /api/admin/dashboard/overview`, `GET /api/admin/dashboard/crawl-metrics`, `GET /api/admin/dashboard/summary-metrics`, `GET /api/admin/dashboard/source-health`.
-3. Summary API: `GET /api/public/articles/{id}/summary`, `POST /api/admin/summaries/jobs`, `GET /api/admin/summaries/jobs`, `POST /api/admin/summaries/{articleId}/retry`, `PUT /api/admin/summaries/{articleId}`.
-4. AI summarize chạy bất đồng bộ theo `summary_job` queue trong PostgreSQL: article mới hoặc article cập nhật sẽ enqueue job, worker riêng lấy job theo batch nhỏ để gọi model.
+3. Summary API: `GET /api/public/articles/{id}/summary`, `POST /api/public/articles/{id}/summarize`, `POST /api/admin/summaries/jobs`, `GET /api/admin/summaries/jobs`, `POST /api/admin/summaries/{articleId}/retry`, `PUT /api/admin/summaries/{articleId}`, `GET /api/admin/settings/summary`, `PUT /api/admin/settings/summary`.
+4. AI summarize chạy bất đồng bộ theo `summary_job` queue trong PostgreSQL: mặc định `auto-summary = OFF`, chỉ enqueue tự động khi admin bật cấu hình; ngoài ra người dùng/admin có thể bấm nút summarize ngay trong trang bài viết để tạo job thủ công.
 5. Admin Sources API: `GET/POST/PUT /api/admin/sources`, `POST /api/admin/sources/{id}/enable`, `POST /api/admin/sources/{id}/disable`, `POST /api/admin/sources/{id}/crawl`.
 6. Admin Crawl Data API: `GET /api/admin/crawl-jobs`, `GET /api/admin/crawl-jobs/{id}`, `POST /api/admin/crawl-jobs/retry`, `POST /api/admin/crawl-jobs/run-all`, `POST /api/admin/articles/reindex`, `DELETE /api/admin/crawl-raw-snapshots` theo retention policy.
 7. Admin Articles API: `GET /api/admin/articles`, `GET /api/admin/articles/{id}`, `POST /api/admin/articles/{id}/re-crawl`, `POST /api/admin/articles/{id}/deduplicate`, `PATCH /api/admin/articles/{id}/status`.
@@ -37,13 +38,13 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 1. Phase 5 - Angular app (parallel with late Phase 4 once API contract ổn định)
 1. Cấu trúc app theo feature modules: Home, NewsList, NewsDetail, SearchFilter, Dashboard, AdminSources, AdminCrawlData, AdminSummaries.
 2. Tạo service gọi API, state quản lý bằng RxJS (hoặc NgRx nếu dữ liệu dashboard/summarize phức tạp).
-3. Trang Home hiển thị tin mới + nhóm theo nguồn/chuyên mục + AI summary ngắn.
+3. Trang Home hiển thị tin mới + nhóm theo nguồn/chuyên mục + AI summary ngắn nếu đã có summary.
 4. Trang List + Search/Filter hỗ trợ phân trang server-side, debounce tìm kiếm.
-5. Trang Detail render nội dung bài viết (sanitize HTML), hiển thị metadata nguồn/thời gian + summary và trạng thái summarize.
-6. Dashboard hiển thị biểu đồ crawl, tình trạng nguồn, tỉ lệ bài đã summarize.
+5. Trang Detail render nội dung bài viết (sanitize HTML), hiển thị metadata nguồn/thời gian + summary và trạng thái summarize; có nút `AI Summarize` để tạo summary thủ công cho bài hiện tại.
+6. Dashboard hiển thị biểu đồ crawl, tình trạng nguồn, tỉ lệ bài đã summarize, và trạng thái auto-summary đang bật/tắt.
 7. Admin Sources cho phép thêm/sửa/bật tắt nguồn và trigger crawl thủ công.
 8. Admin Crawl Data cho phép xem job, lọc theo trạng thái lỗi, trigger re-crawl.
-9. Admin Summaries cho phép trigger summarize hàng loạt, xem phiên bản model, duyệt/chỉnh sửa summary thủ công.
+9. Admin Summaries cho phép trigger summarize hàng loạt, xem phiên bản model, duyệt/chỉnh sửa summary thủ công, và bật/tắt auto-summary ở mức hệ thống.
 
 1. Phase 6 - Chất lượng, bảo mật, vận hành (depends on all phases)
 1. Backend tests: unit parser cho từng nguồn, service tests cho dedup, integration test cho API chính và summary API.
@@ -55,23 +56,26 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 
 **Relevant files**
 - Workspace hiện đang trống, các file cụ thể sẽ xuất hiện sau khi khởi tạo 2 project Angular và Spring Boot.
-- Mẫu cấu trúc mục tiêu: `frontend/*`, `backend/src/main/java/*`, `backend/src/main/resources/*`, `docker-compose.yml`, `.github/workflows/*`, `infra/nginx/*`, `deploy/*`.
+- Mẫu cấu trúc mục tiêu: `frontend/*`, `backend/src/main/java/*`, `backend/src/main/resources/*`, `docker-compose.yml`, `.github/workflows/*`, `infra/nginx/*`, `deploy/*`, `infra/redis/*`.
 - File CI/CD dự kiến: workflow build/test, workflow deploy staging, workflow deploy production, script rollout/restart/healthcheck.
 
 **Verification**
 1. Chạy scheduler trong 2 chu kỳ và xác nhận bài mới được lưu đúng nguồn, không trùng bản ghi.
 2. Kiểm tra legal guard: các URL bị robots.txt chặn không bị crawl, và có log allow/disallow rõ theo từng job.
-3. Kiểm tra API list/detail/search/filter trả đúng phân trang, đúng điều kiện lọc.
-4. Trigger summarize cho một batch bài viết, kiểm tra summary hiển thị đúng ở Home/Detail và trạng thái job cập nhật chuẩn.
-5. Thử bật/tắt nguồn từ trang admin, xác nhận scheduler tôn trọng trạng thái nguồn.
-6. Trigger crawl thủ công từ UI admin và đối chiếu dashboard cập nhật số liệu theo job mới.
-7. Chạy workflow staging, xác nhận deploy thành công, healthcheck pass, UI và API truy cập được qua domain staging.
-8. Kiểm tra rollback từ image/tag trước đó trên EC2 production hoặc staging mô phỏng.
-9. Chạy test suite frontend/backend và kiểm tra tỷ lệ pass 100% trước khi phát hành.
+3. Kiểm tra Redis cache hoạt động cho robots/home/source health và hệ thống vẫn chạy đúng khi cache miss.
+4. Kiểm tra API list/detail/search/filter trả đúng phân trang, đúng điều kiện lọc.
+5. Xác nhận mặc định `auto-summary = OFF`, bài mới không tự enqueue summary job khi chưa bật cấu hình.
+6. Bấm nút `AI Summarize` ở trang bài viết, kiểm tra summary job được tạo và summary hiển thị đúng sau khi xử lý xong.
+7. Bật auto-summary từ admin settings, xác nhận bài mới hoặc bài cập nhật sẽ được enqueue tự động.
+8. Thử bật/tắt nguồn từ trang admin, xác nhận scheduler tôn trọng trạng thái nguồn.
+9. Trigger crawl thủ công từ UI admin và đối chiếu dashboard cập nhật số liệu theo job mới.
+10. Chạy workflow staging, xác nhận deploy thành công, healthcheck pass, UI và API truy cập được qua domain staging.
+11. Kiểm tra rollback từ image/tag trước đó trên EC2 production hoặc staging mô phỏng.
+12. Chạy test suite frontend/backend và kiểm tra tỷ lệ pass 100% trước khi phát hành.
 
 **Decisions**
-- Bao gồm: crawl 5 nguồn (VnExpress, Tuoi Tre, Thanh Nien, Dan Tri, kenh14.vn), tần suất 30-60 phút, PostgreSQL, tuân thủ robots.txt theo domain, lưu nội dung + metadata + link gốc.
-- Bao gồm AI summarize: tóm tắt tiếng Việt theo bài viết, quản lý summary job, hỗ trợ trigger/review summary từ trang admin.
+- Bao gồm: crawl 5 nguồn (VnExpress, Tuoi Tre, Thanh Nien, Dan Tri, kenh14.vn), tần suất 30-60 phút, PostgreSQL, Redis, tuân thủ robots.txt theo domain, lưu nội dung + metadata + link gốc.
+- Bao gồm AI summarize: tóm tắt tiếng Việt theo bài viết, quản lý summary job, mặc định auto-summary tắt, hỗ trợ trigger/review summary từ trang admin và nút summarize trong trang bài viết.
 - Bao gồm UI: home, list, detail, search/filter, dashboard, admin nguồn crawl, admin crawl data, admin summaries.
 - Bao gồm chiến lược deploy: GitHub Actions + EC2 cho staging/production, rollout có healthcheck và rollback cơ bản.
 - Chưa bao gồm: recommendation/cá nhân hóa nâng cao, app mobile, đa ngôn ngữ.
@@ -94,10 +98,11 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 
 - Chính sách AI summarize tạm thời cho MVP: ưu tiên model miễn phí/local trước, cụ thể `Ollama + qwen2.5:7b-instruct` hoặc `gemma2:9b` nếu server đủ tài nguyên; fallback sang Hugging Face Inference free tier nếu cần.
 - Chiến lược summarize:
-1. Chỉ summarize khi bài mới hoặc nội dung thay đổi đáng kể.
-2. Sinh 2 phiên bản `short_summary` (1-2 câu) và `standard_summary` (4-6 câu).
-3. Áp rule kiểm duyệt đầu ra: tiếng Việt, không thêm fact ngoài bài, không quá ngưỡng ký tự.
-4. Nếu model miễn phí timeout hoặc chất lượng thấp, hệ thống giữ trạng thái `PENDING_REVIEW` hoặc `FAILED` thay vì chèn summary kém chất lượng.
+1. Mặc định `auto-summary = OFF`; chỉ khi admin bật cấu hình thì bài mới hoặc bài cập nhật mới được enqueue tự động.
+2. Luôn cho phép trigger thủ công bằng nút `AI Summarize` trong trang chi tiết bài viết.
+3. Sinh 2 phiên bản `short_summary` (1-2 câu) và `standard_summary` (4-6 câu).
+4. Áp rule kiểm duyệt đầu ra: tiếng Việt, không thêm fact ngoài bài, không quá ngưỡng ký tự.
+5. Nếu model miễn phí timeout hoặc chất lượng thấp, hệ thống giữ trạng thái `PENDING_REVIEW` hoặc `FAILED` thay vì chèn summary kém chất lượng.
 - Trang Home hiển thị:
 1. Hero block: top 5 tin mới nhất toàn hệ thống (ưu tiên bài có summary).
 2. Feed chính phân trang: tiêu đề, nguồn, thời gian, ảnh đại diện, short summary, nhãn chuyên mục.
@@ -111,12 +116,13 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 **Technical Architecture**
 - Crawler engine: Spring Boot module riêng theo flow `scheduler -> source adapter -> parser -> persistence`, dùng strategy pattern cho từng nguồn.
 - Fetching strategy: mặc định dùng Jsoup/HTTP client cho tốc độ và độ ổn định; chỉ dùng Playwright ở adapter cần render JavaScript.
+- Redis layer: dùng cho cache robots.txt, cache home/list query nóng, cache source health ngắn hạn, rate-limit admin actions, và optional distributed flags/config cache.
 - Job orchestration: `crawl_job` và `summary_job` là nguồn sự thật cho trạng thái xử lý; worker poll DB theo batch nhỏ, retry giới hạn, idempotent theo article/job key.
 - AI summarize: tạo abstraction `SummaryProvider` để đổi giữa OpenAI/Azure OpenAI/local model mà không ảnh hưởng business logic.
-- Summarization flow: article được lưu xong -> enqueue `summary_job` -> worker dựng prompt tiếng Việt -> gọi provider -> validate output -> lưu `news_summary`.
-- Summary policy: lưu 2 mức tóm tắt (`short_summary`, `standard_summary`), `model_name`, `model_version`, `prompt_version`, `generated_at`, `review_status`.
+- Summarization flow: mặc định không enqueue tự động; khi admin bật `auto-summary` hoặc người dùng bấm nút `AI Summarize` trong bài viết thì mới tạo `summary_job`, worker dựng prompt tiếng Việt -> gọi provider -> validate output -> lưu `news_summary`.
+- Summary policy: lưu 2 mức tóm tắt (`short_summary`, `standard_summary`), `model_name`, `model_version`, `prompt_version`, `generated_at`, `review_status`, `trigger_mode` (`AUTO` hoặc `MANUAL`).
 - Admin security: Angular dùng JWT access token ngắn hạn + refresh token; backend phân quyền tối thiểu cho `ADMIN` và `EDITOR_SUMMARY` nếu cần duyệt nội dung.
-- Frontend integration: public pages chỉ đọc dữ liệu đã summarize; admin pages hiển thị trạng thái job, lỗi model, và thao tác retry/review.
+- Frontend integration: public pages chỉ đọc dữ liệu đã summarize; trang detail có nút `AI Summarize`; admin pages hiển thị trạng thái job, lỗi model, thao tác retry/review và công tắc auto-summary.
 - Observability: tách metric cho crawl success rate, summarize latency, token usage, error rate theo provider/model.
 
 **Project Structure**
@@ -151,6 +157,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - Scheduling và locking: Spring Scheduler + ShedLock.
 - Crawl parsing: Jsoup là mặc định; Playwright Java chỉ dùng ở adapter cần render JavaScript.
 - Database: PostgreSQL 16, Flyway hoặc Liquibase cho migration.
+- Cache và infra phụ trợ: Redis 7 dùng cho cache, rate-limit, source health cache và feature/config cache ngắn hạn.
 - Auth: JWT access token + refresh token; password hash bằng BCrypt/Argon2.
 - API docs: springdoc OpenAPI/Swagger.
 - AI integration: abstraction `SummaryProvider`; ưu tiên Ollama với model miễn phí/local (`qwen2.5:7b-instruct`, `gemma2:9b`) cho MVP, có thể mở rộng sang OpenAI/Azure OpenAI sau; prompt versioning lưu trong DB.
