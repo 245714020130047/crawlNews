@@ -78,11 +78,12 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 12. Trigger crawl thủ công từ UI admin và đối chiếu dashboard cập nhật số liệu theo job mới.
 13. Chạy workflow staging, xác nhận deploy thành công, healthcheck pass, UI và API truy cập được qua domain staging.
 14. Kiểm tra rollback từ image/tag trước đó trên EC2 production hoặc staging mô phỏng.
-15. Chạy test suite frontend/backend và kiểm tra tỷ lệ pass 100% trước khi phát hành.
+15. Kiểm tra cost guard AI API key: vượt `SUMMARY_DAILY_BUDGET_USD` hoặc `SUMMARY_MAX_REQUESTS_PER_HOUR` thì job mới không gọi provider và được log rõ lý do.
+16. Chạy test suite frontend/backend và kiểm tra tỷ lệ pass 100% trước khi phát hành.
 
 **Decisions**
 - Bao gồm: crawl 5 nguồn (VnExpress, Tuoi Tre, Thanh Nien, Dan Tri, kenh14.vn), tần suất 30-60 phút, PostgreSQL, Redis, tuân thủ robots.txt theo domain, lưu nội dung + metadata + link gốc.
-- Bao gồm AI summarize: tóm tắt tiếng Việt theo bài viết, quản lý summary job, mặc định auto-summary tắt, hỗ trợ trigger/review summary từ trang admin và nút summarize trong trang bài viết.
+- Bao gồm AI summarize qua API key (OpenAI/Azure OpenAI/OpenRouter): tóm tắt tiếng Việt theo bài viết, quản lý summary job, mặc định auto-summary tắt, hỗ trợ trigger/review summary từ trang admin và nút summarize trong trang bài viết; không chạy local LLM trên server Free Tier.
 - Bao gồm category: bảng `category` cây 2 cấp, public route `/categories/:slug`, admin CRUD, filter bài theo chuyên mục.
 - Bao gồm database views: `v_article_card`, `v_source_health`, `v_crawl_daily_stats`, `v_summary_metrics`, `v_trending_articles` (materialized). Schema đầy đủ với CHECK constraints, GIN index `tags`, composite index cho polling.
 - Bao gồm Redis dedup dormant: code sẵn nhưng tắt; bật khi scale nhiều worker; fallback an toàn về DB upsert nếu Redis lỗi.
@@ -106,7 +107,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 4. Bảng `article_duplicate_map` để lưu quan hệ `original_article_id -> duplicate_article_id`, lý do merge và thời điểm merge.
 5. Khi có race condition nhiều worker cùng insert, backend dùng upsert (`ON CONFLICT DO UPDATE`) để DB là lớp chặn cuối cùng.
 
-- Chính sách AI summarize tạm thời cho MVP: ưu tiên model miễn phí/local trước, cụ thể `Ollama + qwen2.5:7b-instruct` hoặc `gemma2:9b` nếu server đủ tài nguyên; fallback sang Hugging Face Inference free tier nếu cần.
+- Chính sách AI summarize tạm thời cho MVP: ưu tiên provider dùng API key (khuyến nghị OpenAI `gpt-4.1-mini`, gemini-2.5-flash hoặc Azure OpenAI model tương đương; có thể thay bằng OpenRouter để tối ưu giá)
 - Chiến lược summarize:
 1. Mặc định `auto-summary = OFF`; chỉ khi admin bật cấu hình thì bài mới hoặc bài cập nhật mới được enqueue tự động.
 2. Luôn cho phép trigger thủ công bằng nút `AI Summarize` trong trang chi tiết bài viết.
@@ -237,7 +238,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - Cache và infra phụ trợ: Redis 7 dùng cho cache, rate-limit, source health cache và feature/config cache ngắn hạn.
 - Auth: JWT access token + refresh token; password hash bằng BCrypt/Argon2.
 - API docs: springdoc OpenAPI/Swagger.
-- AI integration: abstraction `SummaryProvider`; ưu tiên Ollama với model miễn phí/local (`qwen2.5:7b-instruct`, `gemma2:9b`) cho MVP, có thể mở rộng sang OpenAI/Azure OpenAI sau; prompt versioning lưu trong DB.
+- AI integration: abstraction `SummaryProvider`; mặc định dùng provider API key (OpenAI/Azure OpenAI/OpenRouter), lưu `provider_name`, `model_name`, `prompt_version`, `token_count` để theo dõi chi phí; local model chỉ là phương án mở rộng khi nâng cấp hạ tầng.
 - Testing backend: JUnit 5, Spring Boot Test, Testcontainers cho PostgreSQL nếu cần integration test thực tế.
 - Testing frontend: Jasmine/Karma hoặc Jest tùy scaffold Angular, Playwright cho e2e smoke test.
 - Build và packaging: Docker, Docker Compose, GitHub Actions, GHCR hoặc Docker Hub để lưu image.
@@ -270,12 +271,13 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 4. Kết quả mong đợi: hệ thống sẵn sàng vận hành production với quy trình release lặp lại được.
 
 **Deployment Strategy**
-- Mô hình triển khai khuyến nghị cho MVP: 1 EC2 `staging`, 1 EC2 `production`, PostgreSQL tách riêng trên RDS nếu ngân sách cho phép; nếu chưa, có thể dùng PostgreSQL cùng host staging trong giai đoạn sớm nhưng không khuyến nghị cho production.
-- Thành phần trên EC2 production: Nginx reverse proxy, Angular static build, Spring Boot API container/service, worker summarize/crawler, Playwright runtime chỉ bật ở node cần thiết.
-- Kiểu deploy khuyến nghị: Docker Compose trên EC2 để đơn giản hóa rollout; mỗi deploy pull image mới, chạy migration, recreate service backend/worker, giữ nguyên Nginx.
-- Chiến lược release: `main` -> deploy `staging` tự động, `tag v*` hoặc `workflow_dispatch` -> deploy `production` có approval.
-- Zero/low downtime cho MVP: rollout tuần tự backend rồi frontend, thêm healthcheck `/actuator/health`, chỉ chuyển traffic sau khi backend healthy.
-- Rollback: giữ 1-2 image tag trước đó trên EC2; workflow có bước chọn tag cũ và chạy lại compose với image cũ.
+- Phương án khuyến nghị cho AWS Free Tier (ưu tiên chi phí thấp): dùng 1 EC2 `t3.micro` duy nhất cho `staging+production` theo mô hình blue/green nhẹ bằng 2 compose profiles (`app-blue`, `app-green`) trên cùng host; DB dùng PostgreSQL container local với EBS gp3 30GB.
+- Nếu cần tách môi trường rõ hơn (khuyến nghị khi có traffic thật): 2 EC2 `t3.micro` (staging/prod), nhưng chỉ nên áp dụng sau khi hết Free Tier hoặc có ngân sách ổn định.
+- Thành phần trên EC2: Nginx reverse proxy, Angular static build, Spring Boot API + crawler + summary worker, PostgreSQL, Redis. Trên Free Tier: tắt Playwright mặc định, chỉ dùng Jsoup-first.
+- Kiểu deploy khuyến nghị: Docker Compose + GHCR image; mỗi deploy pull image mới, chạy migration, recreate backend/worker, giữ nguyên Nginx.
+- Chiến lược release cho Free Tier: `main` -> deploy `staging` profile (port nội bộ khác), verify smoke test; `tag v*` hoặc manual -> switch symlink/upstream Nginx sang profile production.
+- Zero/low downtime mức MVP: healthcheck `/actuator/health`, warmup backend mới trước khi switch Nginx upstream.
+- Rollback: giữ 2 image tag gần nhất trên host; workflow cho phép chọn tag cũ và `docker compose up -d` lại profile trước đó.
 
 **GitHub Actions CI/CD**
 1. Workflow `ci.yml`
@@ -289,23 +291,24 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 1. Trigger: tag release hoặc manual approval.
 2. Job: giống staging nhưng có environment protection rules, backup cấu hình hiện tại, rollout production, verify healthcheck, thông báo trạng thái release.
 4. Secrets bắt buộc trên GitHub Actions
-1. `EC2_HOST_STAGING`, `EC2_HOST_PROD`, `EC2_SSH_USER`, `EC2_SSH_KEY`.
-2. `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` theo từng environment.
-3. `JWT_SECRET`, `OPENAI_API_KEY` hoặc `AZURE_OPENAI_*`, `GITHUB_TOKEN`/`GHCR_TOKEN`.
+1. `EC2_HOST`, `EC2_SSH_USER`, `EC2_SSH_KEY`, `EC2_SSH_PORT` (nếu custom).
+2. `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_REDIS_HOST`, `SPRING_REDIS_PORT`.
+3. `JWT_SECRET`, `AI_PROVIDER` (`OPENAI`/`AZURE_OPENAI`/`OPENROUTER`), `AI_API_KEY`, `AI_MODEL`, `AI_BASE_URL` (optional), `GITHUB_TOKEN`/`GHCR_TOKEN`.
 4. Biến frontend như `ANGULAR_API_BASE_URL`, `ANGULAR_ENV`.
+5. Cost guard secrets/vars: `SUMMARY_DAILY_BUDGET_USD`, `SUMMARY_MAX_REQUESTS_PER_HOUR`, `SUMMARY_MAX_TOKENS_PER_JOB`.
 
 **Technical Requirements**
-- EC2 staging tối thiểu: 2 vCPU, 4 GB RAM, 40-60 GB SSD; production tối thiểu: 4 vCPU, 8 GB RAM, 80+ GB SSD nếu crawler và summarize chạy cùng máy.
-- OS khuyến nghị: Ubuntu 22.04 LTS, Docker Engine + Docker Compose plugin, Nginx, OpenJDK 21, Node 20 LTS cho build runner.
-- Nếu dùng Playwright trên production node: cần thêm dependency system packages và tăng RAM tối thiểu lên 8 GB.
-- Nếu chạy Ollama trên cùng máy production: khuyến nghị tăng lên ít nhất 8-16 GB RAM; nếu máy yếu thì tách summarize sang node riêng hoặc tắt auto-summary theo batch lớn.
-- Domain và TLS: dùng Route53 hoặc DNS bất kỳ, HTTPS qua Let's Encrypt/Nginx.
-- Database: PostgreSQL 16, bật backup hằng ngày, retention log tối thiểu 7-14 ngày.
-- Observability tối thiểu: application logs, Nginx logs, disk/RAM/CPU metrics, alert khi crawl error rate hoặc summarize failure rate vượt ngưỡng.
-- Bảo mật tối thiểu: chỉ mở port 80/443 công khai; port 22 giới hạn IP quản trị; backend/DB không public Internet; secrets không commit vào repo.
-- NFR mục tiêu cho MVP: thời gian crawl một chu kỳ dưới 15 phút với 5 nguồn, tỉ lệ crawl thành công trên 95%, summary latency trung bình dưới 60 giây mỗi batch nhỏ, thời gian phục hồi deploy dưới 10 phút.
+- AWS Free Tier mục tiêu: 1 EC2 `t3.micro` (2 vCPU burst, 1GB RAM), EBS gp3 30GB, Ubuntu 22.04 LTS. Dùng swap 2GB để giảm rủi ro OOM (không thay thế RAM thật).
+- Chế độ runtime Free Tier: backend JVM giới hạn `-Xms256m -Xmx512m`; tắt Playwright mặc định; crawler concurrency thấp (2-4 worker), crawl interval 45-60 phút.
+- AI summarize trên Free Tier: bắt buộc dùng provider API key.
+- Redis/PostgreSQL: chạy cùng host bằng Docker Compose; bật backup DB hằng ngày (`pg_dump` + rotate 7-14 ngày) lên S3 (nếu có) hoặc volume backup thứ hai.
+- Domain và TLS: Route53 (hoặc DNS bất kỳ), HTTPS qua Let's Encrypt + Nginx.
+- Observability tối thiểu: application logs, Nginx logs, disk/RAM/CPU metrics, cảnh báo khi memory > 85%, crawl error rate tăng cao, hoặc summarize failure rate vượt ngưỡng.
+- Bảo mật tối thiểu: chỉ mở 80/443; port 22 giới hạn IP; DB/Redis không public Internet; secrets ở GitHub Secrets + `.env` trên server.
+- NFR mục tiêu cho Free Tier: thời gian crawl một chu kỳ dưới 20 phút với 5 nguồn, tỉ lệ crawl thành công > 93%, summary latency trung bình < 90 giây/batch nhỏ, phục hồi deploy < 15 phút.
 
 **Further Considerations**
-1. Khuyến nghị ưu tiên Azure OpenAI hoặc OpenAI cho MVP để giảm thời gian tích hợp; chỉ cân nhắc local model khi đã rõ yêu cầu chi phí và hạ tầng GPU.
-2. Thiết lập ngân sách summarize theo ngày, giới hạn số bài được summarize mỗi chu kỳ, và policy retry tối đa để tránh bùng chi phí.
-3. Cân nhắc chính sách lưu ảnh: lưu URL gốc ở MVP, chỉ tải về object storage nếu có yêu cầu chống link chết hoặc cần CDN nội bộ.
+1. Khuyến nghị cho AWS Free Tier: dùng API key provider (OpenAI/Azure OpenAI/OpenRouter), ưu tiên model nhỏ/nhanh để giữ chi phí thấp và không tiêu tốn RAM server.
+2. Bật cost guard bắt buộc: daily budget cap, max requests/giờ, max tokens/job; khi vượt ngưỡng thì tự động chuyển trạng thái summary job sang `PENDING_REVIEW` hoặc `SKIPPED_BUDGET`.
+3. Cân nhắc nâng cấp kiến trúc khi traffic tăng: tách PostgreSQL sang RDS, tách worker summarize khỏi API host, bật Redis dedup và tăng kích thước instance.
+4. Cân nhắc chính sách lưu ảnh: lưu URL gốc ở MVP, chỉ tải về object storage nếu có yêu cầu chống link chết hoặc cần CDN nội bộ.
