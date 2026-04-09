@@ -22,29 +22,33 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 5. Dùng Redis cho cache robots.txt, cache homepage/query nóng, cache source health ngắn hạn, và rate-limit cho thao tác admin.
 6. Thực thi legal guard: tải và cache robots.txt theo domain, chỉ crawl các path được phép, lưu dấu vết quyết định allow/disallow theo mỗi crawl job.
 7. Thêm quản lý crawl data: lưu snapshot raw (tuỳ chọn), chuẩn hóa parser version, chính sách retention/archiving, và cơ chế re-crawl theo bài lỗi hoặc bài hot.
-7. Chuẩn hóa dữ liệu lưu nội dung + metadata + link gốc: title, summary, content_html/content_text, author, category, tags, image, published_at, crawl_at, source_url, canonical_url.
-8. Thiết kế pipeline: kiểm tra robots -> fetch list -> lọc trùng -> fetch detail -> parse -> persist -> ghi log kết quả.
+8. Chuẩn hóa dữ liệu lưu nội dung + metadata + link gốc: title, summary, content_html/content_text, author, category, tags, image, published_at, crawl_at, source_url, canonical_url.
+9. Thiết kế pipeline: kiểm tra robots -> fetch list -> lọc trùng -> fetch detail -> parse -> persist -> ghi log kết quả.
 
 1. Phase 4 - Public API + Admin API + AI Summarize (depends on Phase 2/3)
-1. Public API đầy đủ: `GET /api/public/home`, `GET /api/public/articles`, `GET /api/public/articles/{id-or-slug}`, `GET /api/public/sources`, `GET /api/public/categories`, `GET /api/public/trending`, `GET /api/public/search/suggestions`.
+1. Public API đầy đủ: `GET /api/public/home`, `GET /api/public/articles`, `GET /api/public/articles/{id-or-slug}`, `GET /api/public/sources`, `GET /api/public/categories`, `GET /api/public/categories/{slug}` (danh sách bài theo category), `GET /api/public/trending`, `GET /api/public/search/suggestions`.
 2. Dashboard API đầy đủ: `GET /api/admin/dashboard/overview`, `GET /api/admin/dashboard/crawl-metrics`, `GET /api/admin/dashboard/summary-metrics`, `GET /api/admin/dashboard/source-health`.
 3. Summary API: `GET /api/public/articles/{id}/summary`, `POST /api/public/articles/{id}/summarize`, `POST /api/admin/summaries/jobs`, `GET /api/admin/summaries/jobs`, `POST /api/admin/summaries/{articleId}/retry`, `PUT /api/admin/summaries/{articleId}`, `GET /api/admin/settings/summary`, `PUT /api/admin/settings/summary`.
 4. AI summarize chạy bất đồng bộ theo `summary_job` queue trong PostgreSQL: mặc định `auto-summary = OFF`, chỉ enqueue tự động khi admin bật cấu hình; ngoài ra người dùng/admin có thể bấm nút summarize ngay trong trang bài viết để tạo job thủ công.
 5. Admin Sources API: `GET/POST/PUT /api/admin/sources`, `POST /api/admin/sources/{id}/enable`, `POST /api/admin/sources/{id}/disable`, `POST /api/admin/sources/{id}/crawl`.
+5b. Admin Categories API: `GET /api/admin/categories`, `POST /api/admin/categories`, `PUT /api/admin/categories/{id}`, `DELETE /api/admin/categories/{id}` (chỉ khi không có bài nào tham chiếu), `PATCH /api/admin/categories/{id}/toggle`, `PATCH /api/admin/categories/{id}/reorder`.
 6. Admin Crawl Data API: `GET /api/admin/crawl-jobs`, `GET /api/admin/crawl-jobs/{id}`, `POST /api/admin/crawl-jobs/retry`, `POST /api/admin/crawl-jobs/run-all`, `POST /api/admin/articles/reindex`, `DELETE /api/admin/crawl-raw-snapshots` theo retention policy.
 7. Admin Articles API: `GET /api/admin/articles`, `GET /api/admin/articles/{id}`, `POST /api/admin/articles/{id}/re-crawl`, `POST /api/admin/articles/{id}/deduplicate`, `PATCH /api/admin/articles/{id}/status`.
 8. Bổ sung OpenAPI/Swagger, chuẩn error response, pagination/filter/sort nhất quán cho mọi endpoint list.
 
 1. Phase 5 - Angular app (parallel with late Phase 4 once API contract ổn định)
-1. Cấu trúc app theo feature modules: Home, NewsList, NewsDetail, SearchFilter, Dashboard, AdminSources, AdminCrawlData, AdminSummaries.
+1. Cấu trúc app theo feature modules: Home, NewsList, NewsDetail, NewsCategory, SearchFilter, Dashboard, AdminSources, AdminCategories, AdminCrawlData, AdminSummaries.
 2. Tạo service gọi API, state quản lý bằng RxJS (hoặc NgRx nếu dữ liệu dashboard/summarize phức tạp).
-3. Trang Home hiển thị tin mới + nhóm theo nguồn/chuyên mục + AI summary ngắn nếu đã có summary.
-4. Trang List + Search/Filter hỗ trợ phân trang server-side, debounce tìm kiếm.
-5. Trang Detail render nội dung bài viết (sanitize HTML), hiển thị metadata nguồn/thời gian + summary và trạng thái summarize; có nút `AI Summarize` để tạo summary thủ công cho bài hiện tại.
-6. Dashboard hiển thị biểu đồ crawl, tình trạng nguồn, tỉ lệ bài đã summarize, và trạng thái auto-summary đang bật/tắt.
-7. Admin Sources cho phép thêm/sửa/bật tắt nguồn và trigger crawl thủ công.
-8. Admin Crawl Data cho phép xem job, lọc theo trạng thái lỗi, trigger re-crawl.
-9. Admin Summaries cho phép trigger summarize hàng loạt, xem phiên bản model, duyệt/chỉnh sửa summary thủ công, và bật/tắt auto-summary ở mức hệ thống.
+3. UI public side dùng template tin tức tự xây dựng trên Tailwind CSS: news card, hero banner, feed strip, source badge, category chips — không dùng UI framework nặng ở public side để giữ bundle nhỏ và UX nhanh.
+4. Trang Home hiển thị tin mới + nhóm theo nguồn/chuyên mục + AI summary ngắn nếu đã có summary.
+5. Trang List + Search/Filter hỗ trợ phân trang server-side, debounce tìm kiếm.
+6. Trang Category (`/categories/:slug`): tiêu đề chuyên mục, mô tả, danh sách bài phân trang, breadcrumb, sidebar top tags.
+7. Trang Detail render nội dung bài viết (sanitize HTML), hiển thị metadata nguồn/thời gian + summary và trạng thái summarize; có nút `AI Summarize` để tạo summary thủ công cho bài hiện tại.
+8. Dashboard hiển thị biểu đồ crawl, tình trạng nguồn, tỉ lệ bài đã summarize, và trạng thái auto-summary đang bật/tắt.
+9. Admin Sources cho phép thêm/sửa/bật tắt nguồn và trigger crawl thủ công.
+10. Admin Categories cho phép CRUD chuyên mục, thiết lập cây 2 cấp, sắp xếp thứ tự hiển thị, bật/tắt chuyên mục.
+11. Admin Crawl Data cho phép xem job, lọc theo trạng thái lỗi, trigger re-crawl.
+12. Admin Summaries cho phép trigger summarize hàng loạt, xem phiên bản model, duyệt/chỉnh sửa summary thủ công, và bật/tắt auto-summary ở mức hệ thống.
 
 1. Phase 6 - Chất lượng, bảo mật, vận hành (depends on all phases)
 1. Backend tests: unit parser cho từng nguồn, service tests cho dedup, integration test cho API chính và summary API.
@@ -60,23 +64,29 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - File CI/CD dự kiến: workflow build/test, workflow deploy staging, workflow deploy production, script rollout/restart/healthcheck.
 
 **Verification**
-1. Chạy scheduler trong 2 chu kỳ và xác nhận bài mới được lưu đúng nguồn, không trùng bản ghi.
+1. Chạy scheduler trong 2 chu kỳ và xác nhận bài mới được lưu đúng nguồn, đúng category, không trùng bản ghi.
 2. Kiểm tra legal guard: các URL bị robots.txt chặn không bị crawl, và có log allow/disallow rõ theo từng job.
 3. Kiểm tra Redis cache hoạt động cho robots/home/source health và hệ thống vẫn chạy đúng khi cache miss.
-4. Kiểm tra API list/detail/search/filter trả đúng phân trang, đúng điều kiện lọc.
+4. Kiểm tra API list/detail/search/filter và `/categories/:slug` trả đúng phân trang, đúng điều kiện lọc.
 5. Xác nhận mặc định `auto-summary = OFF`, bài mới không tự enqueue summary job khi chưa bật cấu hình.
 6. Bấm nút `AI Summarize` ở trang bài viết, kiểm tra summary job được tạo và summary hiển thị đúng sau khi xử lý xong.
 7. Bật auto-summary từ admin settings, xác nhận bài mới hoặc bài cập nhật sẽ được enqueue tự động.
-8. Thử bật/tắt nguồn từ trang admin, xác nhận scheduler tôn trọng trạng thái nguồn.
-9. Trigger crawl thủ công từ UI admin và đối chiếu dashboard cập nhật số liệu theo job mới.
-10. Chạy workflow staging, xác nhận deploy thành công, healthcheck pass, UI và API truy cập được qua domain staging.
-11. Kiểm tra rollback từ image/tag trước đó trên EC2 production hoặc staging mô phỏng.
-12. Chạy test suite frontend/backend và kiểm tra tỷ lệ pass 100% trước khi phát hành.
+8. CRUD category từ admin: tạo chuyên mục cha/con, gán bài cho chuyên mục, xác nhận public route `/categories/:slug` hiển thị đúng bài.
+9. Xác nhận `v_trending_articles` refresh đúng sau 30 phút; kết quả home trending thay đổi theo bài mới.
+10. Bật `crawler.redis-dedup.enabled=true`, crawl lại source, xác nhận Redis key được tạo và bài trùng không insert lại DB.
+11. Thử bật/tắt nguồn từ trang admin, xác nhận scheduler tôn trọng trạng thái nguồn.
+12. Trigger crawl thủ công từ UI admin và đối chiếu dashboard cập nhật số liệu theo job mới.
+13. Chạy workflow staging, xác nhận deploy thành công, healthcheck pass, UI và API truy cập được qua domain staging.
+14. Kiểm tra rollback từ image/tag trước đó trên EC2 production hoặc staging mô phỏng.
+15. Chạy test suite frontend/backend và kiểm tra tỷ lệ pass 100% trước khi phát hành.
 
 **Decisions**
 - Bao gồm: crawl 5 nguồn (VnExpress, Tuoi Tre, Thanh Nien, Dan Tri, kenh14.vn), tần suất 30-60 phút, PostgreSQL, Redis, tuân thủ robots.txt theo domain, lưu nội dung + metadata + link gốc.
 - Bao gồm AI summarize: tóm tắt tiếng Việt theo bài viết, quản lý summary job, mặc định auto-summary tắt, hỗ trợ trigger/review summary từ trang admin và nút summarize trong trang bài viết.
-- Bao gồm UI: home, list, detail, search/filter, dashboard, admin nguồn crawl, admin crawl data, admin summaries.
+- Bao gồm category: bảng `category` cây 2 cấp, public route `/categories/:slug`, admin CRUD, filter bài theo chuyên mục.
+- Bao gồm database views: `v_article_card`, `v_source_health`, `v_crawl_daily_stats`, `v_summary_metrics`, `v_trending_articles` (materialized). Schema đầy đủ với CHECK constraints, GIN index `tags`, composite index cho polling.
+- Bao gồm Redis dedup dormant: code sẵn nhưng tắt; bật khi scale nhiều worker; fallback an toàn về DB upsert nếu Redis lỗi.
+- Bao gồm UI: home, list, detail, category, search/filter, dashboard, admin nguồn crawl, admin categories, admin crawl data, admin summaries. Public side dùng Tailwind CSS news template custom.
 - Bao gồm chiến lược deploy: GitHub Actions + EC2 cho staging/production, rollout có healthcheck và rollback cơ bản.
 - Chưa bao gồm: recommendation/cá nhân hóa nâng cao, app mobile, đa ngôn ngữ.
 
@@ -113,6 +123,68 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 1. `GET /api/public/home` trả payload tổng hợp (hero, feed, per-source, trending).
 2. `GET /api/public/articles` cho list/search/filter chi tiết (dùng lại ở trang list).
 
+**Database Schema & Tối ưu**
+
+1. Bảng `news_source`: `id BIGSERIAL PK`, `name VARCHAR(100) NOT NULL`, `slug VARCHAR(100) UNIQUE NOT NULL`, `base_url VARCHAR(500) NOT NULL`, `home_url VARCHAR(500)`, `logo_url VARCHAR(500)`, `description TEXT`, `is_active BOOL DEFAULT TRUE`, `crawl_interval_minutes INT DEFAULT 60`, `user_agent VARCHAR(300)`, `last_crawled_at TIMESTAMPTZ`, `last_success_at TIMESTAMPTZ`, `consecutive_fail_count INT DEFAULT 0`, `robots_cache_ttl_seconds INT DEFAULT 3600`, `created_at/updated_at TIMESTAMPTZ DEFAULT NOW()`.
+
+2. Bảng `category`: `id BIGSERIAL PK`, `name VARCHAR(100) NOT NULL`, `slug VARCHAR(100) UNIQUE NOT NULL`, `parent_id BIGINT FK -> category(id) NULL` (cây 2 cấp: nhóm lớn → chuyên mục), `display_order INT DEFAULT 0`, `is_active BOOL DEFAULT TRUE`, `created_at TIMESTAMPTZ DEFAULT NOW()`. Constraint: `CHECK (parent_id <> id)`.
+
+3. Bảng `news_article` (core):
+   - PK/FK: `id BIGSERIAL PK`, `source_id BIGINT FK NOT NULL -> news_source`, `category_id BIGINT FK -> category`.
+   - Nội dung: `title VARCHAR(1000) NOT NULL`, `slug VARCHAR(1100) UNIQUE`, `excerpt TEXT`, `content_html TEXT`, `content_text TEXT` (plain text dùng cho fingerprint/search), `author VARCHAR(300)`, `image_url VARCHAR(500)`, `image_alt VARCHAR(300)`, `tags TEXT[]`.
+   - URL / dedup: `source_url VARCHAR(2000) NOT NULL`, `normalized_source_url VARCHAR(2000)` (bỏ UTM/tracking params), `canonical_url VARCHAR(2000)`, `content_fingerprint VARCHAR(64)` (SHA-256 normalized_title+published_at_rounded+source_id), `simhash_value BIGINT` (near-dup, optional).
+   - Thời gian: `published_at TIMESTAMPTZ`, `first_crawled_at TIMESTAMPTZ DEFAULT NOW()`, `last_crawled_at TIMESTAMPTZ`, `crawl_count INT DEFAULT 1`.
+   - Trạng thái: `view_count INT DEFAULT 0`, `status VARCHAR(20) DEFAULT 'ACTIVE'` CHECK IN (ACTIVE, HIDDEN, DUPLICATE, ARCHIVED), `is_summarized BOOL DEFAULT FALSE`, `created_at/updated_at TIMESTAMPTZ DEFAULT NOW()`.
+
+4. Bảng `crawl_job`: `id BIGSERIAL PK`, `source_id BIGINT FK NOT NULL`, `job_type VARCHAR(20)` CHECK IN (SCHEDULED, MANUAL, RETRY), `status VARCHAR(20)` CHECK IN (PENDING, RUNNING, SUCCESS, FAILED, PARTIAL), `trigger_type VARCHAR(10)`, `triggered_by VARCHAR(200)`, `parser_version VARCHAR(50)`, `articles_found/new/updated/skipped/failed INT DEFAULT 0`, `robots_checked BOOL`, `robots_allowed BOOL`, `error_message TEXT`, `started_at/finished_at TIMESTAMPTZ`, `duration_ms BIGINT`, `created_at TIMESTAMPTZ DEFAULT NOW()`.
+
+5. Bảng `crawl_result` (log per-article): `id BIGSERIAL PK`, `crawl_job_id BIGINT FK NOT NULL`, `article_id BIGINT FK`, `source_url VARCHAR(2000) NOT NULL`, `result VARCHAR(20)` CHECK IN (NEW, UPDATED, DUPLICATE, SKIPPED, FAILED, ROBOTS_BLOCKED), `http_status INT`, `response_time_ms INT`, `error_message TEXT`, `created_at TIMESTAMPTZ DEFAULT NOW()`.
+
+6. Bảng `news_summary`: `id BIGSERIAL PK`, `article_id BIGINT FK UNIQUE NOT NULL` (1 bản ghi per article), `short_summary TEXT`, `standard_summary TEXT`, `model_name VARCHAR(100)`, `model_version VARCHAR(50)`, `prompt_version VARCHAR(20)`, `trigger_mode VARCHAR(10)` CHECK IN (AUTO, MANUAL), `review_status VARCHAR(20) DEFAULT 'PENDING_REVIEW'` CHECK IN (PENDING_REVIEW, APPROVED, REJECTED, EDITED), `reviewed_by VARCHAR(200)`, `reviewed_at TIMESTAMPTZ`, `generated_at TIMESTAMPTZ`, `token_count INT`, `generation_latency_ms INT`, `retry_count INT DEFAULT 0`, `error_message TEXT`, `created_at/updated_at TIMESTAMPTZ DEFAULT NOW()`.
+
+7. Bảng `summary_job` (queue): `id BIGSERIAL PK`, `article_id BIGINT FK NOT NULL`, `priority INT DEFAULT 5` (1=cao, 10=thấp), `status VARCHAR(20) DEFAULT 'QUEUED'` CHECK IN (QUEUED, PROCESSING, DONE, FAILED, CANCELLED), `trigger_mode VARCHAR(10)`, `triggered_by VARCHAR(200)`, `max_retries INT DEFAULT 3`, `retry_count INT DEFAULT 0`, `next_retry_at TIMESTAMPTZ`, `locked_at TIMESTAMPTZ`, `locked_by VARCHAR(200)` (worker lock idempotency), `error_message TEXT`, `created_at/updated_at TIMESTAMPTZ DEFAULT NOW()`. Constraint: `CHECK (retry_count <= max_retries)`.
+
+8. Bảng `article_duplicate_map`: `id BIGSERIAL PK`, `original_article_id BIGINT FK NOT NULL`, `duplicate_article_id BIGINT FK UNIQUE NOT NULL`, `merge_reason VARCHAR(50)` CHECK IN (SAME_URL, SAME_FINGERPRINT, NEAR_DUP), `confidence FLOAT`, `detected_at TIMESTAMPTZ DEFAULT NOW()`.
+
+9. Bảng `app_config` (feature flags + runtime settings): `key VARCHAR(100) PK`, `value TEXT NOT NULL`, `value_type VARCHAR(20)` CHECK IN (STRING, BOOLEAN, INT, JSON), `description TEXT`, `updated_by VARCHAR(200)`, `updated_at TIMESTAMPTZ DEFAULT NOW()`. Seed mặc định: `auto_summary_enabled=false`, `summary_daily_limit=500`, `crawl_default_interval_minutes=60`.
+
+10. Indexes chiến lược:
+    - `news_article`: UNIQUE idx `canonical_url WHERE canonical_url IS NOT NULL`, UNIQUE idx `normalized_source_url`, idx `content_fingerprint`, idx `(source_id, published_at DESC)`, idx `(category_id, published_at DESC)`, idx `(status, published_at DESC)`, idx `(is_summarized, published_at DESC)`, GIN idx `tags` (để filter/search theo tag).
+    - `crawl_job`: idx `(source_id, created_at DESC)`, idx `(status, created_at DESC)`.
+    - `summary_job`: COMPOSITE idx `(status, priority, created_at)` cho worker polling, idx `article_id`.
+    - `crawl_result`: idx `crawl_job_id`, idx `article_id`.
+    - Tất cả FK đều có index tương ứng.
+
+**Database Views**
+
+1. `v_article_card`: LEFT JOIN `news_article` + `news_source` + `category` + `news_summary`; expose id, title, slug, excerpt, image_url, author, published_at, source_name, source_slug, source_logo_url, category_name, category_slug, short_summary, is_summarized, status. Dùng cho home/list/category pages.
+
+2. `v_source_health`: Subquery grouped `crawl_job` per source (last 7 ngày); expose source_id, source_name, last_crawl_at, last_status, success_count_7d, fail_count_7d, avg_duration_ms, articles_new_7d. Dùng cho dashboard + home health mini block.
+
+3. `v_crawl_daily_stats`: GROUP crawl_job theo `DATE(started_at)` + `source_id`; expose date, source_name, total_jobs, articles_found, articles_new, articles_failed, avg_duration_ms. Dùng cho dashboard chart.
+
+4. `v_summary_metrics`: GROUP `summary_job` + `news_summary` theo status, trigger_mode, model_name; expose count theo nhóm. Dùng cho dashboard summarize section.
+
+5. `v_trending_articles` (MATERIALIZED VIEW): Score = `(view_count * 0.6 + crawl_count * 0.4)` với bài `published_at >= NOW() - interval '48 hours'` và `status='ACTIVE'`; LEFT JOIN `news_summary`; ORDER BY score DESC LIMIT 20. Refresh bằng `REFRESH MATERIALIZED VIEW CONCURRENTLY v_trending_articles` mỗi 30 phút qua job phụ.
+
+6. Tối ưu truy vấn:
+   - Home page dùng `v_article_card` + `v_trending_articles`; cache Redis key `cache:home:v1` TTL 5 phút.
+   - List/search dùng `v_article_card` filter index scan; cache Redis key hash của query params TTL 2 phút.
+   - Nếu `news_article` > 5 triệu bản ghi: xem xét RANGE partition theo `published_at` theo năm.
+   - `EXPLAIN ANALYZE` và `pg_stat_statements` để theo dõi slow query; đặt `work_mem=16MB` cho sort/hash join.
+
+**Redis Dedup Strategy (Dormant - không kích hoạt mặc định)**
+
+- Mục đích: giảm DB write pressure và tránh race condition khi nhiều crawler worker chạy đồng thời cho cùng source.
+- Trạng thái: code được viết sẵn nhưng bị tắt hoàn toàn qua flag `crawler.redis-dedup.enabled=false` (default false). Chỉ bật khi scale ra nhiều worker instance hoặc khi DB write latency trở thành bottleneck.
+- Cấu trúc key:
+  1. `dedup:url:{sha256(normalized_source_url)}` → TTL 24h; giá trị `1` hoặc `article_id`.
+  2. `dedup:fp:{content_fingerprint}` → TTL 12h; detect trùng nội dung cross-source.
+  3. `dedup:lock:crawl:{source_id}` → TTL `(crawl_interval + 60s)`; distributed lock bổ sung cho ShedLock.
+- Pipeline khi enabled: trước fetch detail, kiểm tra Redis key → nếu hit thì skip (không query DB) → nếu miss thì fetch + persist + SET key Redis.
+- Fallback an toàn: nếu Redis connection lỗi, `RedisDeduplicator` tự catch exception và fall back về `DbDeduplicator` (ON CONFLICT DO UPDATE); tính đúng đắn không bị ảnh hưởng.
+- Lớp code: `crawler/dedup/RedisDeduplicator.java` (disabled bean `@ConditionalOnProperty`), `crawler/dedup/DbDeduplicator.java` (primary), `crawler/dedup/DeduplicatorChain.java` (composite, inject theo flag).
+
 **Technical Architecture**
 - Crawler engine: Spring Boot module riêng theo flow `scheduler -> source adapter -> parser -> persistence`, dùng strategy pattern cho từng nguồn.
 - Fetching strategy: mặc định dùng Jsoup/HTTP client cho tốc độ và độ ổn định; chỉ dùng Playwright ở adapter cần render JavaScript.
@@ -132,17 +204,21 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - `frontend/src/app/shared/`: UI components dùng chung, pipes, directives, reusable dialogs, table/filter widgets.
 - `frontend/src/app/features/home/`: trang home và các widget feed/tóm tắt nổi bật.
 - `frontend/src/app/features/news/`: danh sách bài viết, chi tiết bài viết, tìm kiếm và lọc.
+- `frontend/src/app/features/categories/`: trang danh sách chuyên mục và trang bài viết theo chuyên mục (`/categories/:slug`).
 - `frontend/src/app/features/dashboard/`: dashboard thống kê crawl và summarize.
 - `frontend/src/app/features/admin-sources/`: CRUD nguồn crawl, bật/tắt nguồn, trigger crawl.
+- `frontend/src/app/features/admin-categories/`: CRUD chuyên mục, cây 2 cấp, sắp xếp thứ tự, bật/tắt.
 - `frontend/src/app/features/admin-crawl-data/`: lịch sử crawl job, lỗi, re-crawl, retention actions.
 - `frontend/src/app/features/admin-summaries/`: summary jobs, review/edit summary, retry summarize.
 - `frontend/src/app/models/`: interface/type cho API contracts.
+- `frontend/src/styles/`: Tailwind CSS config, `_news-card.scss`, `_hero.scss`, `_feed-strip.scss`, `_badge.scss` cho public template.
 - `frontend/src/environments/`: `environment.ts`, `environment.staging.ts`, `environment.prod.ts`.
 - `backend/src/main/java/.../config/`: cấu hình Spring, security, OpenAPI, scheduler, HTTP client, AI provider.
 - `backend/src/main/java/.../domain/`: entity, enum, value object cho article, source, crawl job, summary job.
 - `backend/src/main/java/.../repository/`: JPA repositories hoặc query layer.
 - `backend/src/main/java/.../service/`: business services cho crawl, article query, summary orchestration, admin actions.
 - `backend/src/main/java/.../crawler/`: source adapters, parsers, robots service, fetch client, dedup pipeline.
+- `backend/src/main/java/.../crawler/dedup/`: `DbDeduplicator.java` (primary), `RedisDeduplicator.java` (dormant, `@ConditionalOnProperty`), `DeduplicatorChain.java` (composite).
 - `backend/src/main/java/.../summary/`: prompt builder, provider abstraction, summary worker, review workflow.
 - `backend/src/main/java/.../web/`: REST controllers public/admin, request/response DTO, exception handlers.
 - `backend/src/main/java/.../security/`: JWT auth, refresh token, role handling, filters.
@@ -151,8 +227,9 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - `backend/src/test/`: unit test parser/service, integration test API, repository test.
 
 **Technology Stack**
-- Frontend: Angular 19+, TypeScript, Angular Router, Angular HttpClient, RxJS, Angular Material hoặc PrimeNG cho admin UI, ApexCharts hoặc ECharts cho dashboard.
-- Frontend styling: SCSS, CSS variables, responsive layout, sanitize HTML cho news detail.
+- Frontend: Angular 19+, TypeScript, Angular Router, Angular HttpClient, RxJS, PrimeNG cho admin UI, ApexCharts hoặc ECharts cho dashboard.
+- Frontend public template: Tailwind CSS 3 (utility-first) + custom news components (NewsCard, HeroBanner, FeedStrip, SourceBadge, CategoryChip, TrendingBlock); không dùng UI framework nặng ở public side để giữ LCP < 2.5s. Admin portal vẫn dùng PrimeNG cho table/form phức tạp.
+- Frontend styling: SCSS cho component-level, Tailwind config cho design tokens (màu nguồn tin, typography), DomSanitizer cho news HTML content.
 - Backend: Java 21, Spring Boot 3.4+, Spring Web, Spring Data JPA, Spring Security, Validation, Actuator.
 - Scheduling và locking: Spring Scheduler + ShedLock.
 - Crawl parsing: Jsoup là mặc định; Playwright Java chỉ dùng ở adapter cần render JavaScript.
@@ -170,16 +247,17 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 
 **Sprint Backlog**
 1. Sprint 1 - Foundation và Crawl Core
-1. Khởi tạo Angular, Spring Boot, PostgreSQL, Docker Compose, Flyway/Liquibase, cấu hình môi trường `dev`.
-2. Hoàn thành schema `news_source`, `news_article`, `crawl_job`, `crawl_result`, `news_summary`, `summary_job`.
-3. Cài đặt crawler framework, adapter mẫu cho 1-2 nguồn đầu tiên, robots cache, dedup, scheduler với ShedLock.
-4. Hoàn thành public API tối thiểu cho home/list/detail.
-5. Kết quả mong đợi: crawl được nguồn đầu tiên end-to-end và hiển thị được trên UI cơ bản.
+1. Khởi tạo Angular, Spring Boot, PostgreSQL + Redis, Docker Compose, Flyway/Liquibase, cấu hình môi trường `dev`.
+2. Hoàn thành schema đầy đủ: `news_source`, `category`, `news_article`, `crawl_job`, `crawl_result`, `news_summary`, `summary_job`, `app_config` với tất cả indexes và CHECK constraints theo plan.
+3. Tạo database views: `v_article_card`, `v_source_health`, `v_crawl_daily_stats`, `v_summary_metrics`, `v_trending_articles` (materialized).
+4. Cài đặt crawler framework, `DbDeduplicator` (primary), stub `RedisDeduplicator` (dormant), adapter mẫu cho 1-2 nguồn, robots cache, scheduler với ShedLock.
+5. Hoàn thành public API tối thiểu cho home/list/detail/categories.
+6. Kết quả mong đợi: crawl được nguồn đầu tiên end-to-end, category phân loại được bài, hiển thị trên UI cơ bản.
 2. Sprint 2 - Mở rộng nguồn và Admin/Crawl Data
 1. Mở rộng đủ 5 nguồn crawl, thêm re-crawl, retention policy, log lỗi theo nguồn.
-2. Hoàn thiện admin sources, admin crawl data, dashboard crawl metrics.
+2. Hoàn thiện admin sources, admin categories (CRUD cây 2 cấp), admin crawl data, dashboard crawl metrics.
 3. Thêm auth JWT cho admin, rate-limit và validation.
-4. Kết quả mong đợi: đội vận hành có thể quản trị nguồn, theo dõi job, và trigger crawl thủ công.
+4. Kết quả mong đợi: đội vận hành có thể quản trị nguồn, chuyên mục, theo dõi job, và trigger crawl thủ công.
 3. Sprint 3 - AI Summarize và Review Flow
 1. Tích hợp `SummaryProvider`, summary worker, queue `summary_job`, prompt versioning, review status.
 2. Hoàn thiện summary API, admin summaries, hiển thị summary trên home/detail/dashboard.
@@ -188,7 +266,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 4. Sprint 4 - Hardening và Production Readiness
 1. Hoàn thiện test suite, observability, alerting, healthcheck, backup/restore DB.
 2. Thiết lập GitHub Actions, deploy staging/production lên EC2, Nginx reverse proxy, HTTPS, rollback.
-3. Chạy load/smoke test và kiểm tra quy trình release.
+3. Chạy load/smoke test, kiểm tra `v_trending_articles` refresh, và quy trình release.
 4. Kết quả mong đợi: hệ thống sẵn sàng vận hành production với quy trình release lặp lại được.
 
 **Deployment Strategy**
