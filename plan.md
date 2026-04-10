@@ -5,7 +5,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 **Steps**
 1. Phase 1 - Khởi tạo kiến trúc nền (blocking)
 1. Tạo 2 project độc lập: `frontend` (Angular) và `backend` (Spring Boot).
-2. Chuẩn hóa môi trường local bằng Docker Compose cho PostgreSQL + Redis + pgAdmin (tuỳ chọn) và profile `dev` cho backend.
+2. Chuẩn hóa môi trường local bằng Docker Compose cho PostgreSQL + Redis và profile `dev` cho backend.
 3. Thiết lập cấu hình chung: timezone `Asia/Ho_Chi_Minh`, encoding UTF-8, logging chuẩn JSON/text, CORS giữa Angular và backend.
 
 1. Phase 2 - Thiết kế dữ liệu & domain backend (depends on Phase 1)
@@ -308,7 +308,7 @@ Xây dựng hệ thống 2 lớp Angular + Spring Boot cho bài toán crawl tin 
 - NFR mục tiêu cho Free Tier: thời gian crawl một chu kỳ dưới 20 phút với 5 nguồn, tỉ lệ crawl thành công > 93%, summary latency trung bình < 90 giây/batch nhỏ, phục hồi deploy < 15 phút.
 
 **Further Considerations**
-1. Khuyến nghị cho AWS Free Tier: dùng API key provider (OpenAI/Azure OpenAI/OpenRouter), ưu tiên model nhỏ/nhanh để giữ chi phí thấp và không tiêu tốn RAM server.
+1. Khuyến nghị cho AWS Free Tier: dùng API key provider (OpenAI/Azure OpenAI/OpenRouter).
 2. Bật cost guard bắt buộc: daily budget cap, max requests/giờ, max tokens/job; khi vượt ngưỡng thì tự động chuyển trạng thái summary job sang `PENDING_REVIEW` hoặc `SKIPPED_BUDGET`.
 3. Cân nhắc nâng cấp kiến trúc khi traffic tăng: tách PostgreSQL sang RDS, tách worker summarize khỏi API host, bật Redis dedup và tăng kích thước instance.
 4. Cân nhắc chính sách lưu ảnh: lưu URL gốc ở MVP, chỉ tải về object storage nếu có yêu cầu chống link chết hoặc cần CDN nội bộ.
