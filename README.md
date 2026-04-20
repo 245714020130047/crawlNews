@@ -1,194 +1,212 @@
-# CrawlNews
+# VNNews — Vietnamese News Aggregator with AI Summarization
 
-Nền tảng tổng hợp và tóm tắt tin tức tự động từ các báo lớn của Việt Nam (VnExpress, Tuổi Trẻ, Thanh Niên, Dân Trí, Kênh 14) sử dụng **Spring Boot 3.4 + Angular 19 + AI (Gemini / OpenAI)**.
+Nền tảng tổng hợp tin tức tiếng Việt tự động crawl từ 4 nguồn báo lớn, tóm tắt bằng AI (Google Gemini), hiển thị trên giao diện web responsive dựa trên template BizNews.
 
----
+## Tech Stack
 
-## Tính năng chính
+| Layer | Technology |
+|-------|-----------|
+| Backend | Java 17, Spring Boot 3.3.5, Spring Security (JWT) |
+| Frontend | Angular 17 (Standalone Components, Signals) |
+| Database | PostgreSQL 16 (JSONB, tsvector FTS) |
+| Cache | Redis 7 (Caching + Rate Limiting) |
+| Crawling | Jsoup 1.17.2, Rome 2.1.0 (RSS) |
+| AI | Google Gemini API (swappable sang OpenAI) |
+| DevOps | Docker Compose, Nginx |
 
-| Tính năng | Mô tả |
-|---|---|
-| **Crawl tự động** | Lên lịch crawl theo cron, hỗ trợ 5 nguồn báo, chiến lược adapter |
-| **Dedup thông minh** | 3 lớp trùng lặp: canonical URL → normalized URL → content fingerprint |
-| **AI Tóm tắt** | Tóm tắt bằng Gemini hoặc OpenAI, hàng đợi async, retry tự động |
-| **Robots.txt** | Tuân thủ robots.txt, cache Redis, không crawl đường dẫn bị cấm |
-| **Dashboard admin** | Biểu đồ crawl hàng ngày, sức khỏe nguồn báo, thống kê AI |
-| **Logging cấu trúc** | JSON log (Logstash encoder), file riêng cho crawler và summary, MDC context |
-| **API Swagger** | Tài liệu API tại `/swagger-ui.html` |
+## Nguồn tin
 
----
-
-## Kiến trúc
-
-```
-┌─────────────────┐     HTTP/REST      ┌─────────────────┐
-│  Angular 19     │◄──────────────────►│  Spring Boot    │
-│  (Tailwind CSS  │                    │  3.4 / Java 21  │
-│   PrimeNG 17)   │                    │                 │
-└─────────────────┘                    └────────┬────────┘
-                                                │
-                              ┌─────────────────┼──────────────────┐
-                              ▼                 ▼                  ▼
-                        PostgreSQL 16       Redis 7          AI (Gemini)
-                        (Flyway migration)  (dedup cache,    (summary API)
-                                            robots cache)
-```
-
----
-
-## Yêu cầu
-
-- **Docker** ≥ 24 & **Docker Compose** ≥ 2.20
-- *(Chạy local không Docker)*: Java 21, Maven 3.9+, Node.js 20+, PostgreSQL 16, Redis 7
-
----
-
-## Chạy nhanh bằng Docker Compose
-
-### 1. Clone và cấu hình
-
-```bash
-git clone <repo-url>
-cd crawlNews
-cp .env.example .env
-```
-
-Mở `.env` và điền các giá trị (xem phần [Biến môi trường](#biến-môi-trường)).
-
-### 2. Khởi động
-
-```bash
-docker compose up -d
-```
-
-Lần đầu sẽ mất ~3–5 phút để build image và chạy Flyway migration.
-
-### 3. Kiểm tra
-
-| Dịch vụ | URL |
-|---|---|
-| Frontend | http://localhost:4200 |
-| Backend API | http://localhost:8080 |
-| Swagger UI | http://localhost:8080/swagger-ui.html |
-| Actuator health | http://localhost:8080/actuator/health |
-
-### 4. Dừng
-
-```bash
-docker compose down          # giữ dữ liệu
-docker compose down -v       # xóa cả volumes (reset DB)
-```
-
----
-
-## Chạy local (development)
-
-### Backend
-
-```bash
-# Yêu cầu: PostgreSQL và Redis đang chạy
-cd backend
-cp src/main/resources/application-dev.yml.example src/main/resources/application-dev.yml  # nếu có
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
-```
-
-Backend chạy tại `http://localhost:8080`.
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm start          # proxy /api → localhost:8080
-```
-
-Frontend chạy tại `http://localhost:4200`.
-
----
-
-## Biến môi trường
-
-Tất cả biến được định nghĩa trong `.env` (copy từ `.env.example`).
-
-| Biến | Mặc định | Mô tả |
-|---|---|---|
-| `POSTGRES_DB` | `crawlnews` | Tên database |
-| `POSTGRES_USER` | `crawlnews` | Tên user PostgreSQL |
-| `POSTGRES_PASSWORD` | — | **Bắt buộc thay đổi** |
-| `APP_JWT_SECRET` | — | Secret JWT, tối thiểu 32 ký tự |
-| `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Các origin cho phép |
-| `AI_PROVIDER` | `GEMINI` | Nhà cung cấp AI (`GEMINI` hoặc `OPENAI`) |
-| `AI_API_KEY` | — | API key của Gemini/OpenAI |
-| `AI_MODEL` | `gemini-2.0-flash` | Model sử dụng |
-| `AI_BASE_URL` | Gemini endpoint | Base URL của API |
-| `BACKEND_PORT` | `8080` | Port expose backend |
-| `FRONTEND_PORT` | `4200` | Port expose frontend |
-
----
+| Nguồn | Phương thức |
+|-------|-------------|
+| VnExpress | RSS + Jsoup HTML scraping |
+| Tuổi Trẻ | RSS + Jsoup HTML scraping |
+| Thanh Niên | RSS + Jsoup HTML scraping |
+| Dân Trí | RSS + Jsoup HTML scraping |
 
 ## Cấu trúc dự án
 
 ```
 crawlNews/
-├── backend/                    # Spring Boot application
-│   ├── src/main/java/com/crawlnews/backend/
-│   │   ├── config/             # SecurityConfig, WebConfig, RedisConfig...
-│   │   ├── crawler/            # Adapter pattern + Pipeline + Scheduler
-│   │   ├── domain/             # JPA Entities + Enums
-│   │   ├── repository/         # Spring Data JPA repositories
-│   │   ├── service/            # Business logic
-│   │   └── web/                # REST Controllers (public + admin)
-│   └── src/main/resources/
-│       ├── application.yml     # Main config
-│       ├── application-dev.yml # Dev overrides
-│       ├── logback-spring.xml  # JSON structured logging
-│       └── db/migration/       # Flyway V1 schema, V2 seed, V3 views
-├── frontend/                   # Angular 19 application
+├── backend/                        # Spring Boot REST API
+│   └── src/main/java/com/vnnews/
+│       ├── config/                 # CacheConfig, RateLimitFilter
+│       ├── controller/             # 6 REST controllers
+│       ├── dto/                    # Request/Response DTOs
+│       ├── entity/                 # 10 JPA entities
+│       ├── exception/              # GlobalExceptionHandler
+│       ├── repository/             # 10 Spring Data repositories
+│       ├── security/               # JWT, UserDetails, SecurityConfig
+│       └── service/
+│           ├── ai/                 # Gemini/OpenAI summarizers
+│           └── crawler/            # 4 source crawlers + scheduler
+├── frontend/                       # Angular 17 SPA
 │   └── src/app/
-│       ├── core/               # Services + Interceptors
-│       ├── features/           # home, news, dashboard, admin-*
-│       ├── models/             # TypeScript interfaces
-│       └── app.routes.ts       # Lazy-loaded routes
-├── docker-compose.yml
-├── .env.example
-└── README.md
+│       ├── admin/                  # 7 admin components
+│       ├── components/             # 5 shared components
+│       ├── guards/                 # Auth + Admin guards
+│       ├── interceptors/           # JWT interceptor
+│       ├── models/                 # TypeScript interfaces
+│       ├── pages/                  # 6 page components
+│       └── services/               # 4 Angular services
+└── docker-compose.yml              # PostgreSQL + Redis + Backend + Frontend
 ```
 
----
+## Tính năng chính
 
-## API chính
+- **Tự động crawl** tin tức từ 4 nguồn mỗi 30 phút (cron có thể chỉnh)
+- **AI Summarization** — tóm tắt tự động bằng Gemini, có nút "Tóm tắt bằng AI" cho user
+- **Full-text Search** — tìm kiếm tiếng Việt bằng PostgreSQL tsvector
+- **3 cấp phân quyền** — ANONYMOUS (đọc), USER (tóm tắt AI), ADMIN (toàn quyền)
+- **Rate Limiting** — Bucket4j + Redis, giới hạn theo IP
+- **IP Analytics** — theo dõi lượt xem, geolocation (MaxMind GeoIP2)
+- **Image Proxy** — proxy ảnh từ nguồn để tránh hotlink blocking
+- **Admin Panel** — Dashboard, quản lý bài viết/chuyên mục/user/crawl/scheduler/analytics
+- **Responsive UI** — dựa trên BizNews template (Bootstrap 4)
 
-| Method | Endpoint | Mô tả |
-|---|---|---|
-| GET | `/api/public/home` | Dữ liệu trang chủ |
-| GET | `/api/public/articles` | Danh sách bài viết (phân trang) |
-| GET | `/api/public/articles/{id}` | Chi tiết bài viết |
-| POST | `/api/public/articles/{id}/summarize` | Yêu cầu tóm tắt AI |
-| GET | `/api/admin/dashboard/overview` | Tổng quan hệ thống |
-| GET | `/api/admin/crawl-jobs` | Lịch sử crawl |
-| GET | `/api/admin/sources` | Quản lý nguồn báo |
-| POST | `/api/admin/sources/{id}/crawl` | Crawl thủ công |
-| GET | `/api/admin/summaries/jobs` | Hàng đợi AI summary |
-| PUT | `/api/admin/summaries/settings` | Cấu hình AI summary |
+## Yêu cầu hệ thống
 
----
+- Java 17+
+- Node.js 20+
+- PostgreSQL 16+
+- Redis 7+
+- Maven 3.9+ (hoặc dùng Docker)
 
-## Logs
+## Cài đặt & Chạy
+
+### Cách 1: Docker Compose (khuyến nghị)
 
 ```bash
-# Xem log backend realtime
-docker compose logs -f backend
+# Clone project
+cd crawlNews
 
-# Hoặc xem file log (mount ra ./logs/)
-tail -f logs/crawlnews-dev.json   # JSON structured
-tail -f logs/crawler.log          # Crawler chuyên dụng
-tail -f logs/summary.log          # AI summary chuyên dụng
+# Tạo file .env
+cp .env.example .env
+# Chỉnh sửa GEMINI_API_KEY trong .env
+
+# Chạy toàn bộ
+docker-compose up -d
+
+# Truy cập:
+# Frontend: http://localhost
+# Backend API: http://localhost:8080/api
 ```
 
----
+### Cách 2: Chạy thủ công
 
-## Lưu ý bảo mật
+#### 1. Database
 
-- Không commit file `.env`
-- Đổi `POSTGRES_PASSWORD` và `APP_JWT_SECRET` trước khi deploy
-- Admin endpoints hiện `permitAll()` – cần bật JWT filter cho production
+```bash
+# Khởi động PostgreSQL và Redis
+docker run -d --name vnnews-db -p 5432:5432 \
+  -e POSTGRES_DB=vnnews -e POSTGRES_USER=vnnews -e POSTGRES_PASSWORD=vnnews_secret \
+  postgres:16-alpine
+
+docker run -d --name vnnews-redis -p 6379:6379 redis:7-alpine
+```
+
+#### 2. Backend
+
+```bash
+cd backend
+
+# Cấu hình (tạo file hoặc set biến môi trường)
+export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/vnnews
+export SPRING_DATASOURCE_USERNAME=vnnews
+export SPRING_DATASOURCE_PASSWORD=vnnews_secret
+export SPRING_DATA_REDIS_HOST=localhost
+export JWT_SECRET=your-256-bit-secret-key
+export GEMINI_API_KEY=your-gemini-api-key
+
+# Build & Run
+mvn clean package -DskipTests
+java -jar target/*.jar
+
+# API chạy tại http://localhost:8080
+```
+
+#### 3. Frontend
+
+```bash
+cd frontend
+
+# Cài dependencies
+npm install
+
+# Development
+npm start
+# Truy cập http://localhost:4200
+
+# Production build
+npm run build
+# Output tại dist/vnnews-frontend/
+```
+
+## Tài khoản mặc định
+
+| Username | Password | Role |
+|----------|----------|------|
+| admin | admin123 | ADMIN |
+
+> **Lưu ý:** Đổi mật khẩu ngay sau lần đăng nhập đầu tiên.
+
+## API Endpoints chính
+
+### Public
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/api/articles` | Danh sách bài viết (phân trang) |
+| GET | `/api/articles/{slug}` | Chi tiết bài viết |
+| GET | `/api/articles/search?q=` | Tìm kiếm full-text |
+| GET | `/api/articles/trending` | Bài viết xu hướng |
+| GET | `/api/categories` | Danh sách chuyên mục |
+| GET | `/api/categories/{slug}/articles` | Bài theo chuyên mục |
+| POST | `/api/auth/login` | Đăng nhập |
+| POST | `/api/auth/register` | Đăng ký |
+
+### User (cần đăng nhập)
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| POST | `/api/articles/{id}/summarize` | Tóm tắt bằng AI |
+
+### Admin
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| GET | `/api/admin/dashboard` | Thống kê tổng quan |
+| CRUD | `/api/admin/articles` | Quản lý bài viết |
+| CRUD | `/api/admin/categories` | Quản lý chuyên mục |
+| CRUD | `/api/admin/users` | Quản lý người dùng |
+| PUT | `/api/admin/schedulers/{id}/toggle` | Bật/tắt scheduler |
+| POST | `/api/admin/crawl/trigger` | Chạy crawl thủ công |
+| GET | `/api/admin/analytics` | Thống kê truy cập |
+| CRUD | `/api/admin/ip-blacklist` | Quản lý IP bị chặn |
+
+## Biến môi trường
+
+| Biến | Mô tả | Mặc định |
+|------|-------|----------|
+| `SPRING_DATASOURCE_URL` | PostgreSQL connection URL | `jdbc:postgresql://localhost:5432/vnnews` |
+| `SPRING_DATASOURCE_USERNAME` | DB username | `vnnews` |
+| `SPRING_DATASOURCE_PASSWORD` | DB password | `vnnews_secret` |
+| `SPRING_DATA_REDIS_HOST` | Redis host | `localhost` |
+| `JWT_SECRET` | Secret key cho JWT | — |
+| `GEMINI_API_KEY` | Google Gemini API key | — |
+
+## Database Migrations
+
+Flyway tự động chạy khi backend khởi động:
+
+| Migration | Mô tả |
+|-----------|-------|
+| V1 | Tạo tables + indexes + tsvector |
+| V2 | Seed 12 chuyên mục tiếng Việt |
+| V3 | Seed 4 crawl configs (VnExpress, Tuổi Trẻ, Thanh Niên, Dân Trí) |
+| V4 | Seed category mappings |
+| V5 | Seed admin user mặc định |
+| V6 | Seed scheduler + AI configs |
+
+## License
+
+MIT

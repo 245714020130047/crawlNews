@@ -1,63 +1,66 @@
 import { Routes } from '@angular/router';
+import { authGuard } from './guards/auth.guard';
+import { adminGuard } from './guards/admin.guard';
 
 export const routes: Routes = [
   {
     path: '',
-    redirectTo: 'home',
-    pathMatch: 'full'
+    loadComponent: () => import('./pages/home/home.component').then(m => m.HomeComponent)
   },
   {
-    path: 'home',
-    loadComponent: () => import('./features/home/home.component').then(m => m.HomeComponent),
-    title: 'CrawlNews - Trang chủ'
+    path: 'category/:slug',
+    loadComponent: () => import('./pages/category/category.component').then(m => m.CategoryComponent)
   },
   {
-    path: 'articles',
-    loadComponent: () => import('./features/news/news-list/news-list.component').then(m => m.NewsListComponent),
-    title: 'CrawlNews - Danh sách tin'
+    path: 'article/:slug',
+    loadComponent: () => import('./pages/article-detail/article-detail.component').then(m => m.ArticleDetailComponent)
   },
   {
-    path: 'articles/:id',
-    loadComponent: () => import('./features/news/news-detail/news-detail.component').then(m => m.NewsDetailComponent),
-    title: 'CrawlNews - Chi tiết'
+    path: 'search',
+    loadComponent: () => import('./pages/search/search.component').then(m => m.SearchComponent)
   },
   {
-    path: 'categories',
-    loadComponent: () => import('./features/news/category/category-list.component').then(m => m.CategoryListComponent),
-    title: 'CrawlNews - Chuyên mục'
+    path: 'login',
+    loadComponent: () => import('./pages/login/login.component').then(m => m.LoginComponent)
   },
   {
-    path: 'categories/:slug',
-    loadComponent: () => import('./features/news/category/category-articles.component').then(m => m.CategoryArticlesComponent),
-    title: 'CrawlNews - Chuyên mục'
+    path: 'register',
+    loadComponent: () => import('./pages/register/register.component').then(m => m.RegisterComponent)
   },
   {
-    path: 'dashboard',
-    loadComponent: () => import('./features/dashboard/dashboard.component').then(m => m.DashboardComponent),
-    title: 'Admin - Dashboard'
+    path: 'admin',
+    canActivate: [adminGuard],
+    loadComponent: () => import('./admin/admin-layout/admin-layout.component').then(m => m.AdminLayoutComponent),
+    children: [
+      {
+        path: '',
+        loadComponent: () => import('./admin/dashboard/dashboard.component').then(m => m.DashboardComponent)
+      },
+      {
+        path: 'articles',
+        loadComponent: () => import('./admin/articles/articles.component').then(m => m.AdminArticlesComponent)
+      },
+      {
+        path: 'categories',
+        loadComponent: () => import('./admin/categories/categories.component').then(m => m.AdminCategoriesComponent)
+      },
+      {
+        path: 'users',
+        loadComponent: () => import('./admin/users/users.component').then(m => m.AdminUsersComponent)
+      },
+      {
+        path: 'crawl',
+        loadComponent: () => import('./admin/crawl/crawl.component').then(m => m.AdminCrawlComponent)
+      },
+      {
+        path: 'schedulers',
+        loadComponent: () => import('./admin/schedulers/schedulers.component').then(m => m.AdminSchedulersComponent)
+      },
+      {
+        path: 'analytics',
+        loadComponent: () => import('./admin/analytics/analytics.component').then(m => m.AdminAnalyticsComponent)
+      }
+    ]
   },
-  {
-    path: 'admin/sources',
-    loadComponent: () => import('./features/admin-sources/admin-sources.component').then(m => m.AdminSourcesComponent),
-    title: 'Admin - Nguồn crawl'
-  },
-  {
-    path: 'admin/categories',
-    loadComponent: () => import('./features/admin-categories/admin-categories.component').then(m => m.AdminCategoriesComponent),
-    title: 'Admin - Chuyên mục'
-  },
-  {
-    path: 'admin/crawl-jobs',
-    loadComponent: () => import('./features/admin-crawl-data/admin-crawl-data.component').then(m => m.AdminCrawlDataComponent),
-    title: 'Admin - Crawl Jobs'
-  },
-  {
-    path: 'admin/summaries',
-    loadComponent: () => import('./features/admin-summaries/admin-summaries.component').then(m => m.AdminSummariesComponent),
-    title: 'Admin - AI Summaries'
-  },
-  {
-    path: '**',
-    redirectTo: 'home'
-  }
+  { path: '**', redirectTo: '' }
 ];
